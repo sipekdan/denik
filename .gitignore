@@ -1,0 +1,5 @@
+/target/
+/denik.txt
+/denik.tmp
+/*.exe
+/*.pdb
