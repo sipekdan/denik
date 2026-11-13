@@ -45,13 +45,17 @@ replacing `denik.txt`.
 Days form a custom singly linked list: `Option<Box<Day>>`. The selected day is
 a zero-based index; finding it walks from the head, taking O(number of days).
 
-Each day owns a custom `ArrayList`: linked blocks of eight `Option<String>`
-slots. Index 10 is in block `10 / 8 = 1`, slot `10 % 8 = 2`. Appending allocates
-a block when needed. Deletion shifts later strings left across block boundaries,
-moving ownership rather than cloning strings. Lookups walk the blocks;
-this is not a contiguous array with O(1) indexing. Deletion is O(n^2) in the
-worst case because it repeatedly finds slots from the head. Empty blocks stay
-available for reuse. Both lists are dropped iteratively to avoid deep recursion.
+Each day owns a custom `ArrayList`: one heap array of `Option<String>` slots.
+It starts with capacity 8. When full, it allocates twice the capacity (16, 32,
+64, ...), moves the strings into it, and releases the old array. `len` counts
+entries; the array length is its capacity. Indexing is O(1), deletion shifts
+later entries left in O(n), and appending is O(1) amortized (O(n) when growing).
+Deletion keeps the allocated capacity for reuse.
+
+`Box<[Option<String>]>` owns the array. The iterator in `empty_array` only
+creates empty storage; resizing, moving entries, and list operations are
+implemented explicitly. Strings are moved, not cloned. Array cleanup is
+automatic; only the linked list of days still needs iterative destruction.
 
 No `Vec`, built-in linked list, or map stores diary data. Comments explain
 ownership, index calculations, node insertion/removal, and file parsing.
@@ -65,14 +69,14 @@ cargo fmt --check
 cargo clippy -- -D warnings
 ```
 
-Model tests cover dates, block boundaries, shifting, insertion/deletion rules,
+Model tests cover dates, capacity doubling, shifting, insertion/deletion rules,
 multiline UTF-8 save/load, and malformed files.
 
 ## Presentation order
 
 1. Start with `run()` in main.rs: show the day, read a command, perform an action.
 2. Explain `add()` and `delete()`: input validation and confirmation.
-3. In model.rs, show `Block` and `ArrayList`: arrays linked in blocks of eight.
+3. In model.rs, show `ArrayList`: one array, entry count, and capacity doubling.
 4. Walk through `get`, `push`, and `remove`, using three entries as an example.
 5. Show `Day` and `Diary`: a sorted linked list with a selected day index.
 6. Finish with `save` and `load`: byte lengths preserve multiline text.

@@ -20,16 +20,33 @@ fn calendar() {
 }
 
 #[test]
-fn array_blocks_and_shift() {
+fn array_growth_and_shift() {
     let mut list = ArrayList::new();
-    for i in 0..100 {
+    assert_eq!(list.items.len(), 8);
+    assert_eq!(list.get(0), None);
+    for i in 0usize..100 {
         list.push(i.to_string());
+        let expected_capacity = (i + 1).next_power_of_two().max(8);
+        assert_eq!(list.items.len(), expected_capacity);
+        for j in 0..=i {
+            assert_eq!(list.get(j), Some(j.to_string().as_str()));
+        }
     }
     assert!(list.remove(7));
     assert_eq!(list.get(7), Some("8"));
     assert!(list.remove(0));
     assert_eq!(list.get(97), Some("99"));
     assert!(!list.remove(98));
+    assert!(list.remove(97));
+    assert_eq!(list.get(97), None);
+    while list.len > 0 {
+        assert!(list.remove(0));
+    }
+    assert_eq!(list.get(0), None);
+    assert_eq!(list.items.len(), 128);
+    assert!(!list.remove(0));
+    list.push("reused".into());
+    assert_eq!(list.get(0), Some("reused"));
 }
 
 #[test]

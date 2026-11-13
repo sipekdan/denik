@@ -5,51 +5,41 @@
 use std::fmt;
 use std::io::{self, Read, Write};
 
-// Fixed arrays linked together: [0..7] -> [8..15] -> ...
-// Some(text) is occupied, None is empty. Box owns the next block.
-const BLOCK: usize = 8;
-#[derive(Default)]
-struct Block {
-    items: [Option<String>; BLOCK],
-    next: Option<Box<Block>>,
-}
-
-#[derive(Default)]
-// len is the number of entries; occupied slots have no gaps.
+// One owned heap array. len counts entries; items.len() is the capacity.
+// Slots 0..len contain Some(text); the remaining slots contain None.
 pub struct ArrayList {
-    head: Block,
+    items: Box<[Option<String>]>,
     pub len: usize,
 }
 
 impl ArrayList {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            items: Self::empty_array(8),
+            len: 0,
+        }
     }
 
-    // Index 10: block 10 / 8 = 1, slot 10 % 8 = 2.
+    // Allocate empty slots only. Growth, insertion and deletion are our code.
+    fn empty_array(capacity: usize) -> Box<[Option<String>]> {
+        std::iter::repeat_with(|| None).take(capacity).collect()
+    }
+
     pub fn get(&self, index: usize) -> Option<&str> {
-        if index >= self.len {
-            return None;
-        }
-        let mut block = &self.head;
-        for _ in 0..index / BLOCK {
-            block = block.next.as_deref()?;
-        }
-        block.items[index % BLOCK].as_deref()
+        self.items.get(index)?.as_deref()
     }
 
-    // Find a writable slot, creating missing blocks when appending.
-    fn slot(&mut self, index: usize) -> &mut Option<String> {
-        let mut block = &mut self.head;
-        for _ in 0..index / BLOCK {
-            block = block.next.get_or_insert_default();
-        }
-        &mut block.items[index % BLOCK]
-    }
-
-    // Append at len, allocating another block only when needed.
     pub fn push(&mut self, text: String) {
-        *self.slot(self.len) = Some(text);
+        if self.len == self.items.len() {
+            // Full: allocate twice the space and move entries to the new array.
+            let mut larger = Self::empty_array(self.items.len() * 2);
+            for (i, slot) in larger.iter_mut().enumerate().take(self.len) {
+                *slot = self.items[i].take();
+            }
+            // Replacing items frees the old, now empty array automatically.
+            self.items = larger;
+        }
+        self.items[self.len] = Some(text);
         self.len += 1;
     }
 
@@ -57,26 +47,13 @@ impl ArrayList {
         if index >= self.len {
             return false;
         }
-        // Move later entries left: [A, B, C] deleting B becomes [A, C].
-        // take() moves a String without copying it, leaving None behind.
+        // Move entries left to close the gap: [A, B, C] -> [A, C, None].
         for i in index..self.len - 1 {
-            let next = self.slot(i + 1).take();
-            *self.slot(i) = next;
+            self.items[i] = self.items[i + 1].take();
         }
         self.len -= 1;
-        // Also handles deleting the last entry, where the shift loop is empty.
-        self.slot(self.len).take();
+        self.items[self.len] = None;
         true
-    }
-}
-
-// Detach links one at a time to avoid recursive destruction of a long list.
-impl Drop for ArrayList {
-    fn drop(&mut self) {
-        let mut next = self.head.next.take();
-        while let Some(mut block) = next {
-            next = block.next.take();
-        }
     }
 }
 
