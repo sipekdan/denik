@@ -67,22 +67,21 @@ pub struct Date {
 
 impl Date {
     pub fn parse(s: &str) -> Result<Self, String> {
-        let b = s.as_bytes();
         let error = || "Enter a valid date in dd.MM.yyyy format.".to_owned();
-        // Check ASCII first so the string slices below are safe.
-        if b.len() != 10
-            || b[2] != b'.'
-            || b[5] != b'.'
-            || !b
-                .iter()
-                .enumerate()
-                .all(|(i, c)| i == 2 || i == 5 || c.is_ascii_digit())
-        {
+        // "01.02.2026" -> "01" and "02.2026" -> "02" and "2026".
+        let (day, rest) = s.split_once('.').ok_or_else(error)?;
+        let (month, year) = rest.split_once('.').ok_or_else(error)?;
+        // Each part must have exactly the given number of digits.
+        let digits = |part: &str, width: usize| {
+            part.len() == width && part.bytes().all(|c| c.is_ascii_digit())
+        };
+        if !digits(day, 2) || !digits(month, 2) || !digits(year, 4) {
             return Err(error());
         }
-        let day = s[..2].parse::<u8>().map_err(|_| error())?;
-        let month = s[3..5].parse::<u8>().map_err(|_| error())?;
-        let year = s[6..].parse::<u16>().map_err(|_| error())?;
+        // Only digits remain, so parsing cannot fail.
+        let day: u8 = day.parse().unwrap();
+        let month: u8 = month.parse().unwrap();
+        let year: u16 = year.parse().unwrap();
         // Gregorian rule: divisible by 4, except centuries not divisible by 400.
         let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
         let max = match month {
@@ -145,19 +144,27 @@ impl Diary {
 
     // Same date appends text. A new date must follow the current day and
     // precede its successor; with no successor, any later date is allowed.
-    pub fn add(&mut self, date: Date, text: String) -> Result<(), String> {
-        if text.trim().is_empty() {
-            return Err("Entry text cannot be blank.".into());
-        }
-        if let Some(day) = self.link(self.current).as_mut() {
-            if date == day.date {
-                day.entries.push(text);
-                return Ok(());
-            }
+    // Separate from add so the interface can reject a date before the text.
+    pub fn check_date(&self, date: Date) -> Result<(), String> {
+        if let Some(day) = self.day() {
             if date < day.date || day.next.as_ref().is_some_and(|next| date >= next.date) {
                 return Err(
                     "Date must match the current day or be between it and the next day.".into(),
                 );
+            }
+        }
+        Ok(())
+    }
+
+    pub fn add(&mut self, date: Date, text: String) -> Result<(), String> {
+        if text.trim().is_empty() {
+            return Err("Entry text cannot be blank.".into());
+        }
+        self.check_date(date)?;
+        if let Some(day) = self.link(self.current).as_mut() {
+            if date == day.date {
+                day.entries.push(text);
+                return Ok(());
             }
             self.current += 1;
         }
@@ -195,18 +202,24 @@ impl Diary {
         true
     }
 
-    // Format: magic header, then date/count and byte-length-prefixed texts.
-    // Byte lengths allow text to contain newlines and UTF-8 characters.
+    // File format, one item per line:
+    //   DENIK1
+    //   01.01.2026 2      <- date and number of entries
+    //   1                 <- number of lines of the first entry
+    //   Hello
+    //   2                 <- the second entry has two lines
+    //   first line
+    //   second line
+    // The line count lets an entry contain newlines.
     pub fn save(&self, mut out: impl Write) -> io::Result<()> {
-        out.write_all(b"DENIK1\n")?;
+        writeln!(out, "DENIK1")?;
         let mut node = self.head.as_deref();
         while let Some(day) = node {
             writeln!(out, "{} {}", day.date, day.entries.len)?;
             for i in 0..day.entries.len {
                 let text = day.entries.get(i).unwrap();
-                writeln!(out, "{}", text.len())?;
-                out.write_all(text.as_bytes())?;
-                out.write_all(b"\n")?;
+                writeln!(out, "{}", text.split('\n').count())?;
+                writeln!(out, "{text}")?;
             }
             node = day.next.as_deref();
         }
@@ -217,16 +230,12 @@ impl Diary {
     pub fn load(mut input: impl Read) -> Result<Self, String> {
         let mut data = String::new();
         input.read_to_string(&mut data).map_err(|e| e.to_string())?;
-        let mut rest = data.strip_prefix("DENIK1\n").ok_or("Invalid diary file.")?;
-        let mut diary = Self::new();
-        // Read a metadata line and advance the remaining input.
-        fn line<'a>(rest: &mut &'a str) -> Result<&'a str, String> {
-            let (line, tail) = rest.split_once('\n').ok_or("Incomplete file.")?;
-            *rest = tail;
-            Ok(line)
+        let mut lines = data.lines();
+        if lines.next() != Some("DENIK1") {
+            return Err("Invalid diary file.".into());
         }
-        while !rest.is_empty() {
-            let header = line(&mut rest)?;
+        let mut diary = Self::new();
+        while let Some(header) = lines.next() {
             let (date, count) = header.split_once(' ').ok_or("Invalid day header.")?;
             let date = Date::parse(date)?;
             let count: usize = count.parse().map_err(|_| "Invalid entry count.")?;
@@ -234,32 +243,25 @@ impl Diary {
                 return Err("Days must be nonempty and sorted by date.".into());
             }
             for _ in 0..count {
-                let size: usize = line(&mut rest)?
+                let line_count: usize = lines
+                    .next()
+                    .ok_or("Incomplete file.")?
                     .parse()
-                    .map_err(|_| "Invalid text length.")?;
-                // get() also rejects lengths that split a UTF-8 character.
-                let text = rest.get(..size).ok_or("Invalid text length.")?;
-                let tail = rest
-                    .get(size..)
-                    .and_then(|s| s.strip_prefix('\n'))
-                    .ok_or("Incomplete entry.")?;
+                    .map_err(|_| "Invalid line count.")?;
+                // Join the entry's lines back together with newlines.
+                let mut text = String::new();
+                for i in 0..line_count {
+                    if i > 0 {
+                        text.push('\n');
+                    }
+                    text.push_str(lines.next().ok_or("Incomplete entry.")?);
+                }
                 // Reuse insertion validation, including rejecting blank text.
-                diary.add(date, text.to_owned())?;
-                rest = tail;
+                diary.add(date, text)?;
             }
         }
         diary.current = 0;
         Ok(diary)
-    }
-}
-
-// Detach each day to avoid recursive drops on a long diary.
-impl Drop for Diary {
-    fn drop(&mut self) {
-        let mut next = self.head.take();
-        while let Some(mut day) = next {
-            next = day.next.take();
-        }
     }
 }
 

@@ -21,9 +21,10 @@ The diary starts empty. Enter a command shown below the current day:
 | `load` | Replace the diary with `denik.txt`, selecting the first day |
 | `quit` | Exit (save first; saving is manual) |
 
-Dates use `dd.MM.yyyy`. Invalid dates are requested again. The same date adds
-an entry to the current day. A later date creates a day after the current one,
-provided it precedes the next day. Other dates are rejected.
+Dates use `dd.MM.yyyy`. Invalid dates are requested again; an empty line
+cancels adding. The same date adds an entry to the current day. A later date
+creates a day after the current one, provided it precedes the next day. Other
+dates are rejected immediately, before the text is requested.
 
 Finish entry text with a line containing only `.`. Use `..` to enter a literal
 dot on its own line. Blank lines and spaces inside the entry are preserved.
@@ -32,9 +33,7 @@ Blank entries are rejected. Closing standard input exits without saving.
 The current day is displayed with numbered entries and counts.
 Deleting its last entry removes the day and selects the next day, or the
 previous day when there is no next day. Cancelling deletion changes nothing.
-A failed load leaves the current diary untouched. Existing `DENIK1` files
-from the web version are compatible. Save writes and syncs `denik.tmp` before
-replacing `denik.txt`.
+A failed load leaves the current diary untouched.
 
 ## How the code works
 
@@ -54,12 +53,14 @@ Deletion keeps the allocated capacity for reuse.
 
 `Box<[Option<String>]>` owns the array. The iterator in `empty_array` only
 creates empty storage; resizing, moving entries, and list operations are
-implemented explicitly. Strings are moved, not cloned. Array cleanup is
-automatic; only the linked list of days still needs iterative destruction.
+implemented explicitly. Strings are moved, not cloned. Memory is freed
+automatically when the diary is dropped.
 
 No `Vec`, built-in linked list, or map stores diary data. Comments explain
 ownership, index calculations, node insertion/removal, and file parsing.
-The length-prefixed file format preserves multiline UTF-8 text.
+The file starts with `DENIK1`. Each day is a line with its date and entry
+count; each entry is its number of lines followed by those lines, so multiline
+text is preserved.
 
 ## Checks
 
@@ -79,4 +80,4 @@ multiline UTF-8 save/load, and malformed files.
 3. In model.rs, show `ArrayList`: one array, entry count, and capacity doubling.
 4. Walk through `get`, `push`, and `remove`, using three entries as an example.
 5. Show `Day` and `Diary`: a sorted linked list with a selected day index.
-6. Finish with `save` and `load`: byte lengths preserve multiline text.
+6. Finish with `save` and `load`: line counts preserve multiline text.

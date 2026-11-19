@@ -2,7 +2,7 @@
 mod model;
 
 use model::{Date, Diary};
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::{self, Write};
 
 // Flush the prompt before reading. EOF exits rather than looping forever.
@@ -31,13 +31,23 @@ fn show(diary: &Diary) {
 }
 
 fn add(diary: &mut Diary) -> io::Result<()> {
-    // Retry invalid dates before asking for text, as required by the assignment.
+    // Retry invalid formats, as required by the assignment. An empty line cancels.
     let date = loop {
-        match Date::parse(&prompt("Date (dd.MM.yyyy): ")?) {
+        let input = prompt("Date (dd.MM.yyyy, empty to cancel): ")?;
+        if input.trim().is_empty() {
+            println!("Adding cancelled.");
+            return Ok(());
+        }
+        match Date::parse(input.trim()) {
             Ok(date) => break date,
             Err(error) => println!("{error}"),
         }
     };
+    // Reject a date in the wrong place now, so no text is typed in vain.
+    if let Err(error) = diary.check_date(date) {
+        println!("{error}");
+        return Ok(());
+    }
     println!("Enter text. Finish with a line containing only . (use .. for a literal .).");
     let mut text = String::new();
     loop {
@@ -84,12 +94,7 @@ fn delete(diary: &mut Diary) -> io::Result<()> {
 }
 
 fn save(diary: &Diary) -> io::Result<()> {
-    // Finish and sync the new file before replacing the previous saved diary.
-    let mut file = File::create("denik.tmp")?;
-    diary.save(&mut file)?;
-    file.sync_all()?;
-    drop(file);
-    fs::rename("denik.tmp", "denik.txt")
+    diary.save(File::create("denik.txt")?)
 }
 
 fn run() -> io::Result<()> {

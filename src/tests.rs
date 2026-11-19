@@ -10,6 +10,8 @@ fn calendar() {
         "29.02.1900",
         "31.04.2026",
         "1.01.2026",
+        "01.01.2026.",
+        "+1.01.2026",
         "00.01.2026",
         "01.01.0000",
         "é.01.2026",
@@ -74,4 +76,14 @@ fn insertion_deletion_and_persistence() {
     copy.remove(0);
     assert_eq!(copy.len, 0);
     assert!(Diary::load(b"DENIK1\n01.01.2026 1\n999\nx\n".as_slice()).is_err());
+    assert!(Diary::load(b"DENIK1\n01.01.2026 1\nx\n".as_slice()).is_err());
+    // Blank lines inside and at the end of an entry survive saving.
+    let mut d = Diary::new();
+    d.add(date("01.01.2026"), "a\n\nb\n".into()).unwrap();
+    let mut bytes = [0; 64];
+    let mut output = io::Cursor::new(&mut bytes[..]);
+    d.save(&mut output).unwrap();
+    let size = output.position() as usize;
+    let copy = Diary::load(&bytes[..size]).unwrap();
+    assert_eq!(copy.day().unwrap().entries.get(0), Some("a\n\nb\n"));
 }
